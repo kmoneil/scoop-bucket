@@ -1,0 +1,43 @@
+{
+    "version": "0.2.8",
+    "description": "Transactional multi-file text editor for coding agents",
+    "homepage": "https://github.com/kmoneil/hunk",
+    "license": "Apache-2.0",
+    "suggest": {
+        "sh, for --verify and --try": "main/git"
+    },
+    "architecture": {
+        "64bit": {
+            "url": [
+                "https://github.com/kmoneil/hunk/releases/download/v0.2.8/hunk-windows-amd64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.2.8/hunk-skill.tar.gz#/skill.download"
+            ],
+            "hash": [
+                "4e1cf6219d9eba8a3305e7450faeaead0db8eab54c1bd1334d49c05babbb5482",
+                "cace63b86b1f6b3ff8bd4937a9df408175a057414dbbf3034bff14f06679446e"
+            ]
+        },
+        "arm64": {
+            "url": [
+                "https://github.com/kmoneil/hunk/releases/download/v0.2.8/hunk-windows-arm64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.2.8/hunk-skill.tar.gz#/skill.download"
+            ],
+            "hash": [
+                "fdbdff3bbb8797a08620ddcf1b2a6f036372a0af85b7029e36d08b83f48387d2",
+                "cace63b86b1f6b3ff8bd4937a9df408175a057414dbbf3034bff14f06679446e"
+            ]
+        }
+    },
+    "bin": "hunk.exe",
+    "post_install": [
+        "$skills = Join-Path $env:USERPROFILE '.claude\\skills'",
+        "New-Item -ItemType Directory -Force -Path $skills | Out-Null",
+        "& \"$env:SystemRoot\\System32\\tar.exe\" -xzf \"$dir\\skill.download\" -C $skills",
+        "if ($LASTEXITCODE -ne 0) { throw \"tar could not extract hunk's skill into $skills\" }"
+    ],
+    "notes": [
+        "hunk's agent skill is in ~\\.claude\\skills\\hunk, and 'scoop update hunk' keeps it at",
+        "the binary's version. 'scoop uninstall hunk' leaves it where it is.",
+        "--verify and --try run their command with sh, which 'scoop install git' provides."
+    ]
+}

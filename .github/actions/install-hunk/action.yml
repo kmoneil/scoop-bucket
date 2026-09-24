@@ -1,0 +1,72 @@
+name: install hunk with Scoop
+description: >
+  On a Windows runner: install Scoop, install hunk from this checkout's
+  bucket/hunk.json, check what that installed, and check that uninstalling
+  leaves the skill where the manifest's notes say it stays.
+
+# One definition of "the manifest works", for the two callers that ask it:
+# scoop.yml, of a change somebody pushed, and bump-hunk.yml, of a manifest a
+# script has just rewritten. kmoneil/homebrew-tap learned not to keep two
+# copies of this: the half that drifts is the one guarding the change nobody
+# watches.
+
+inputs:
+  expect-version:
+    description: >
+      The version hunk must report. Empty means whatever the manifest says,
+      which is all scoop.yml can ask. A bump knows the answer before it starts,
+      which is how it catches a manifest that is not the one it meant to
+      verify.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: install Scoop
+      shell: pwsh
+      run: |
+        # The runners are administrators, and Scoop's installer refuses one
+        # unless told it may.
+        Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+        Join-Path $env:USERPROFILE 'scoop\shims' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+    - name: install hunk from this checkout
+      shell: pwsh
+      run: scoop install (Resolve-Path bucket\hunk.json).Path
+
+    - name: what it installed
+      shell: pwsh
+      env:
+        WANT: ${{ inputs.expect-version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $manifest = Get-Content bucket\hunk.json -Raw | ConvertFrom-Json
+        $want = if ($env:WANT) { $env:WANT } else { $manifest.version }
+        if ($manifest.version -ne $want) {
+          throw "bucket/hunk.json says $($manifest.version), and $want was asked for"
+        }
+        $got = hunk --version
+        if ($got -ne "hunk v$want") { throw "hunk --version said '$got', not 'hunk v$want'" }
+        foreach ($file in 'SKILL.md', 'references\exit-codes.md') {
+          $path = Join-Path $env:USERPROFILE ".claude\skills\hunk\$file"
+          if (-not (Test-Path $path)) { throw "the skill has no $path" }
+        }
+        # The skill is saved under a name Scoop does not extract, because
+        # extracting a .tar.gz is something Scoop only does after installing
+        # 7-Zip, and hunk has no business installing that.
+        if (Test-Path (Join-Path $env:USERPROFILE 'scoop\apps\7zip')) {
+          throw 'Scoop installed 7-Zip to install hunk'
+        }
+        "hunk v$want from $((Get-Command hunk).Source), its skill, and no 7-Zip"
+
+    - name: uninstalling leaves the skill
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        scoop uninstall hunk
+        if (Get-Command hunk -ErrorAction SilentlyContinue) { throw 'hunk is still on the PATH' }
+        if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\hunk\SKILL.md'))) {
+          throw 'uninstalling removed the skill, which the notes say it leaves'
+        }
+        'uninstalled, and the skill stays, as the notes say'

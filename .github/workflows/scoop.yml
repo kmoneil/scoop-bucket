@@ -1,0 +1,33 @@
+name: scoop
+
+# A manifest can only be checked where Scoop runs, and this one installs a
+# binary and a skill from a release rather than building anything, so "the
+# JSON parses" is a long way short of "it installs". This installs it with
+# real Scoop on a Windows runner and runs what it installed, on every change.
+#
+# The steps are in .github/actions/install-hunk, because bump-hunk.yml asks the
+# same question of a manifest it has just rewritten.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: the bump script's tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+  install:
+    name: install with Scoop
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/install-hunk

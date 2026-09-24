@@ -1,0 +1,2 @@
+# The tests import bump-hunk.py, and importing compiles it.
+__pycache__/
