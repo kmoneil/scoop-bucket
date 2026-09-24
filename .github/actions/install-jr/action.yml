@@ -1,0 +1,98 @@
+name: install jr with Scoop
+description: >
+  On a Windows runner: install Scoop, install jr from this checkout's
+  bucket/jr.json, check what that installed, and check that uninstalling
+  leaves the skill where the manifest's notes say it stays.
+
+# One definition of "the manifest works", for the two callers that ask it:
+# scoop.yml, of a change somebody pushed, and bump-jr.yml, of a manifest a
+# script has just rewritten. install-hunk is the same for hunk.
+
+inputs:
+  expect-version:
+    description: >
+      The version jr must report. Empty means whatever the manifest says,
+      which is all scoop.yml can ask. A bump knows the answer before it starts,
+      which is how it catches a manifest that is not the one it meant to
+      verify.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: install Scoop
+      shell: pwsh
+      run: |
+        # The runners are administrators, and Scoop's installer refuses one
+        # unless told it may.
+        if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+          Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+        }
+        Join-Path $env:USERPROFILE 'scoop\shims' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+    - name: install jr from this checkout
+      shell: pwsh
+      run: scoop install (Resolve-Path bucket\jr.json).Path
+
+    - name: what it installed
+      shell: pwsh
+      env:
+        WANT: ${{ inputs.expect-version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $manifest = Get-Content bucket\jr.json -Raw | ConvertFrom-Json
+        $want = if ($env:WANT) { $env:WANT } else { $manifest.version }
+        if ($manifest.version -ne $want) {
+          throw "bucket/jr.json says $($manifest.version), and $want was asked for"
+        }
+
+        # The same assertion the release makes of every tag: the binary reports
+        # the version it was installed as.
+        $row = jr version --format tsv | Where-Object { $_ -like "@release`t*" }
+        $got = ($row -split "`t")[1]
+        if ($got -ne $want) { throw "jr version reports '$got', not $want" }
+
+        # The skill is written by the binary at install, so it has to be what
+        # the binary prints, file for file and byte for byte. Compared against
+        # a fresh --dir rather than a redirect, which PowerShell would re-encode.
+        $skill = Join-Path $env:USERPROFILE '.claude\skills\jr'
+        $fresh = Join-Path $env:RUNNER_TEMP 'jr-skill'
+        jr skill --dir $fresh
+        if ($LASTEXITCODE -ne 0) { throw 'jr skill --dir could not write a fresh copy' }
+        $files = Get-ChildItem -Recurse -File $fresh
+        if ($files.Count -lt 2) { throw "a fresh skill holds $($files.Count) files" }
+        foreach ($file in $files) {
+          $rel = $file.FullName.Substring($fresh.Length + 1)
+          $installed = Join-Path $skill $rel
+          if (-not (Test-Path $installed)) { throw "the installed skill has no $rel" }
+          if ((Get-FileHash $installed).Hash -ne (Get-FileHash $file.FullName).Hash) {
+            throw "the installed $rel is not what jr prints"
+          }
+        }
+
+        # What the tool is for, and it needs no credential and no network: a
+        # result cut short says so with exit 3 rather than passing for whole.
+        jr schema --limit 3 | Out-Null
+        if ($LASTEXITCODE -ne 3) { throw "jr schema --limit 3 exited $LASTEXITCODE, not 3" }
+
+        # The README's completion line, run as written. A script PowerShell
+        # cannot parse throws here, under Stop.
+        jr completion powershell | Out-String | Invoke-Expression
+
+        # A zip is extracted without 7-Zip, which is why the release ships one.
+        if (Test-Path (Join-Path $env:USERPROFILE 'scoop\apps\7zip')) {
+          throw 'Scoop installed 7-Zip to install jr'
+        }
+        "jr $got from $((Get-Command jr).Source), its skill, and no 7-Zip"
+
+    - name: uninstalling leaves the skill
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        scoop uninstall jr
+        if (Get-Command jr -ErrorAction SilentlyContinue) { throw 'jr is still on the PATH' }
+        if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\jr\SKILL.md'))) {
+          throw 'uninstalling removed the skill, which the notes say it leaves'
+        }
+        'uninstalled, and the skill stays, as the notes say'

@@ -1,0 +1,29 @@
+{
+    "version": "0.17.2",
+    "description": "Jira client whose output is a versioned contract, for scripts and agents",
+    "homepage": "https://github.com/kmoneil/jr",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/kmoneil/jr/releases/download/v0.17.2/jr-full_0.17.2_windows_amd64.zip",
+            "hash": "be3a2a0755cd0ae8838353233404c22d436748bd35f884874a5bae8987c9b81c",
+            "extract_dir": "jr-full_0.17.2_windows_amd64"
+        },
+        "arm64": {
+            "url": "https://github.com/kmoneil/jr/releases/download/v0.17.2/jr-full_0.17.2_windows_arm64.zip",
+            "hash": "890f5e186d7ac81df07f596577bf52c05de5290077355ba1388996106c4c6cd6",
+            "extract_dir": "jr-full_0.17.2_windows_arm64"
+        }
+    },
+    "bin": "jr.exe",
+    "post_install": [
+        "$skill = Join-Path $env:USERPROFILE '.claude\\skills\\jr'",
+        "& \"$dir\\jr.exe\" skill --dir $skill --force",
+        "if ($LASTEXITCODE -ne 0) { throw \"jr could not write its skill into $skill\" }"
+    ],
+    "notes": [
+        "jr's agent skill is in ~\\.claude\\skills\\jr, written by the binary it describes, and",
+        "'scoop update jr' rewrites it at the new version. 'scoop uninstall jr' leaves it there.",
+        "jr refuses to write it into a directory holding a file the skill does not include."
+    ]
+}

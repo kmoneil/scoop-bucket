@@ -5,8 +5,8 @@ name: scoop
 # JSON parses" is a long way short of "it installs". This installs it with
 # real Scoop on a Windows runner and runs what it installed, on every change.
 #
-# The steps are in .github/actions/install-hunk, because bump-hunk.yml asks the
-# same question of a manifest it has just rewritten.
+# The steps are in .github/actions/install-hunk and install-jr, because each
+# bump workflow asks the same question of a manifest it has just rewritten.
 
 on:
   push:
@@ -31,3 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/install-hunk
+
+  install-jr:
+    name: install jr with Scoop
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/install-jr
