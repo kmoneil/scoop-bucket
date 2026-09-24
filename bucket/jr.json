@@ -17,13 +17,16 @@
     },
     "bin": "jr.exe",
     "post_install": [
-        "$skill = Join-Path $env:USERPROFILE '.claude\\skills\\jr'",
-        "& \"$dir\\jr.exe\" skill --dir $skill --force",
-        "if ($LASTEXITCODE -ne 0) { throw \"jr could not write its skill into $skill\" }"
+        "foreach ($skills in '.agents\\skills\\jr', '.claude\\skills\\jr') {",
+        "    $skill = Join-Path $env:USERPROFILE $skills",
+        "    & \"$dir\\jr.exe\" skill --dir $skill --force",
+        "    if ($LASTEXITCODE -ne 0) { throw \"jr could not write its skill into $skill\" }",
+        "}"
     ],
     "notes": [
-        "jr's agent skill is in ~\\.claude\\skills\\jr, written by the binary it describes, and",
-        "'scoop update jr' rewrites it at the new version. 'scoop uninstall jr' leaves it there.",
-        "jr refuses to write it into a directory holding a file the skill does not include."
+        "jr's agent skill is in ~\\.agents\\skills\\jr, the cross-agent folder, and in",
+        "~\\.claude\\skills\\jr, where Claude Code reads it, both written by the binary they",
+        "describe. 'scoop update jr' rewrites both at the new version. 'scoop uninstall jr'",
+        "leaves them. jr refuses a directory holding a file the skill does not include."
     ]
 }
