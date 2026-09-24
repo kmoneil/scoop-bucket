@@ -49,8 +49,10 @@ runs:
         $got = hunk --version
         if ($got -ne "hunk v$want") { throw "hunk --version said '$got', not 'hunk v$want'" }
         foreach ($file in 'SKILL.md', 'references\exit-codes.md') {
-          $path = Join-Path $env:USERPROFILE ".claude\skills\hunk\$file"
-          if (-not (Test-Path $path)) { throw "the skill has no $path" }
+          foreach ($base in '.claude\skills\hunk', '.agents\skills\hunk') {
+            $path = Join-Path $env:USERPROFILE "$base\$file"
+            if (-not (Test-Path $path)) { throw "the skill has no $path" }
+          }
         }
         # The skill is saved under a name Scoop does not extract, because
         # extracting a .tar.gz is something Scoop only does after installing
@@ -58,7 +60,7 @@ runs:
         if (Test-Path (Join-Path $env:USERPROFILE 'scoop\apps\7zip')) {
           throw 'Scoop installed 7-Zip to install hunk'
         }
-        "hunk v$want from $((Get-Command hunk).Source), its skill, and no 7-Zip"
+        "hunk v$want from $((Get-Command hunk).Source), its skill in both folders, and no 7-Zip"
 
     - name: uninstalling leaves the skill
       shell: pwsh
@@ -66,7 +68,9 @@ runs:
         $ErrorActionPreference = 'Stop'
         scoop uninstall hunk
         if (Get-Command hunk -ErrorAction SilentlyContinue) { throw 'hunk is still on the PATH' }
-        if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\hunk\SKILL.md'))) {
-          throw 'uninstalling removed the skill, which the notes say it leaves'
+        foreach ($base in '.claude\skills\hunk', '.agents\skills\hunk') {
+          if (-not (Test-Path (Join-Path $env:USERPROFILE "$base\SKILL.md"))) {
+            throw 'uninstalling removed the skill, which the notes say it leaves'
+          }
         }
         'uninstalled, and the skill stays, as the notes say'

@@ -30,14 +30,19 @@
     },
     "bin": "hunk.exe",
     "post_install": [
-        "$skills = Join-Path $env:USERPROFILE '.claude\\skills'",
-        "New-Item -ItemType Directory -Force -Path $skills | Out-Null",
-        "& \"$env:SystemRoot\\System32\\tar.exe\" -xzf \"$dir\\skill.download\" -C $skills",
-        "if ($LASTEXITCODE -ne 0) { throw \"tar could not extract hunk's skill into $skills\" }"
+        "$claude = Join-Path $env:USERPROFILE '.claude\\skills'",
+        "$agents = Join-Path $env:USERPROFILE '.agents\\skills'",
+        "New-Item -ItemType Directory -Force -Path $claude, $agents | Out-Null",
+        "& \"$env:SystemRoot\\System32\\tar.exe\" -xzf \"$dir\\skill.download\" -C $claude",
+        "if ($LASTEXITCODE -ne 0) { throw \"tar could not extract hunk's skill into $claude\" }",
+        "& \"$env:SystemRoot\\System32\\tar.exe\" -xzf \"$dir\\skill.download\" -C $agents",
+        "if ($LASTEXITCODE -ne 0) { throw \"tar could not extract hunk's skill into $agents\" }"
     ],
     "notes": [
-        "hunk's agent skill is in ~\\.claude\\skills\\hunk, and 'scoop update hunk' keeps it at",
-        "the binary's version. 'scoop uninstall hunk' leaves it where it is.",
+        "hunk's agent skill is in ~\\.claude\\skills\\hunk, the folder Claude Code reads, and",
+        "~\\.agents\\skills\\hunk, the unified folder most other agents read. 'scoop update",
+        "hunk' keeps both at the binary's version. 'scoop uninstall hunk' leaves them where",
+        "they are.",
         "--verify and --try run their command with sh, which 'scoop install git' provides."
     ]
 }
