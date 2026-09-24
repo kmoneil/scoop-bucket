@@ -1,2 +1,4 @@
-# The tests import bump-hunk.py, and importing compiles it.
+# The tests import the bump scripts, and importing compiles them.
 __pycache__/
+# What bump-jr.py downloads while it checks a digest, for verify-provenance.py.
+dist/
