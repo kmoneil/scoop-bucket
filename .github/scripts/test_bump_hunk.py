@@ -201,6 +201,72 @@ class PlanTest(unittest.TestCase):
         self.use(honest())
         self.assertIn("the manifest has no version", self.refusal(edited(lambda m: m.pop("version"))))
 
+    def test_an_older_release_is_refused_before_anything_is_fetched(self):
+        """A release workflow run again on an old tag asks for exactly this."""
+        stub = self.use(honest())
+        with self.assertRaises(bump.Refused) as caught:
+            bump.plan(self.path, "v0.9.9", "kmoneil/hunk")
+        self.assertIn("hunk.json points at v1.0.0, which is newer than v0.9.9", str(caught.exception))
+        self.assertIn("A bump never moves a manifest back", str(caught.exception))
+        self.assertEqual(stub.urls, [], "a downgrade fetched before it was refused")
+        self.assertEqual(self.path.read_text(), TEXT)
+
+    def test_versions_compare_as_numbers_in_every_component(self):
+        """v0.2.10 after v0.2.9 is the row a string comparison gets backwards."""
+        rows = [
+            # (the manifest's release, the tag asked for, refused)
+            ("1.0.0", "v0.9.9", True),
+            ("1.2.0", "v1.1.9", True),
+            ("1.1.2", "v1.1.1", True),
+            ("0.2.10", "v0.2.9", True),
+            ("0.2.9", "v0.2.10", False),
+            ("0.10.0", "v0.9.0", True),
+            ("0.9.0", "v0.10.0", False),
+            ("9.0.0", "v10.0.0", False),
+            ("1.0.0", "v1.0.0", False),
+        ]
+        for have, want, refused in rows:
+            with self.subTest(have=have, want=want):
+                self.path.write_text(TEXT.replace("1.0.0", have))
+                self.use(honest())
+                if refused:
+                    with self.assertRaises(bump.Refused) as caught:
+                        bump.plan(self.path, want, "kmoneil/hunk")
+                    self.assertIn(f"points at v{have}, which is newer than {want}", str(caught.exception))
+                else:
+                    text, _ = bump.plan(self.path, want, "kmoneil/hunk")
+                    self.assertEqual(json.loads(text)["version"], want.removeprefix("v"))
+
+    def test_the_version_alone_is_enough_to_refuse(self):
+        """scoop update compares the version, so a newer one there counts though every URL is older."""
+        self.use(honest())
+        text = edited(lambda m: m.update({"version": "3.0.0"}))
+        self.assertIn("hunk.json points at v3.0.0, which is newer than v2.0.0", self.refusal(text))
+
+    def test_one_url_already_newer_is_enough_to_refuse(self):
+        self.use(honest())
+
+        def ahead(m):
+            m["architecture"]["arm64"]["url"][0] = m["architecture"]["arm64"]["url"][0].replace("v1.0.0", "v3.0.0")
+
+        self.assertIn("hunk.json points at v3.0.0, which is newer than v2.0.0", self.refusal(edited(ahead)))
+
+    def test_a_version_that_is_not_a_release_is_refused(self):
+        self.use(honest())
+        text = edited(lambda m: m.update({"version": "1.0.0-rc.1"}))
+        self.assertIn(
+            "the manifest's version is v1.0.0-rc.1, which is not a release tag, so which is newer cannot be told",
+            self.refusal(text),
+        )
+
+    def test_a_url_on_a_tag_that_is_not_a_release_is_refused(self):
+        self.use(honest())
+
+        def odd(m):
+            m["architecture"]["64bit"]["url"][1] = m["architecture"]["64bit"]["url"][1].replace("v1.0.0", "v1.0.0-rc.1")
+
+        self.assertIn("64bit url 2 points at v1.0.0-rc.1, which is not a release tag", self.refusal(edited(odd)))
+
     def test_it_rewrites_the_version_urls_and_hashes_and_nothing_else(self):
         self.use(honest())
         text, _ = bump.plan(self.path, "v2.0.0", "kmoneil/hunk")
@@ -297,6 +363,18 @@ class MainTest(unittest.TestCase):
         self.assertIn("hunk.json already points at 2.0.0; nothing to do", out)
         self.assertEqual(self.path.read_text(), written)
         self.assertEqual(self.emitted(), {"version": "2.0.0", "changed": "false"})
+
+    def test_an_older_tag_after_a_newer_one_exits_1_and_writes_nothing(self):
+        """v2.0.0 is out and the manifest has it; then v1.0.0 is announced again."""
+        self.run_main("--tag", "v2.0.0")
+        written = self.path.read_text()
+        self.outputs.unlink()
+        code, out, err = self.run_main("--tag", "v1.0.0")
+        self.assertEqual(code, 1)
+        self.assertIn("refused: hunk.json points at v2.0.0, which is newer than v1.0.0", err)
+        self.assertEqual(out, "")
+        self.assertEqual(self.path.read_text(), written)
+        self.assertFalse(self.outputs.exists(), "a refused bump reported outputs to the workflow")
 
 
 class FetchTest(unittest.TestCase):
