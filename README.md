@@ -83,6 +83,11 @@ release workflow, built from the tag; installs the result with Scoop on a
 Windows runner; and only then moves `main`. `scoop.yml` installs each manifest
 the same way on every change.
 
+hunk's bump never moves the manifest back: a tag older than the version it
+already carries is refused before anything is downloaded, so a release run
+again on an old tag cannot undo a newer one. Going back on purpose is a hand
+edit.
+
 The skill is downloaded as `skill.download` rather than under its own name, on
 purpose: Scoop extracts a `.tar.gz` only after installing 7-Zip, and the
 manifest extracts it with Windows' own `tar` instead.

@@ -15,6 +15,13 @@ bytes the manifest names.
 It writes nothing until every check has passed, so a failure leaves the manifest
 alone rather than half-edited. It is kmoneil/homebrew-tap's bump-hunk.py, for a
 JSON manifest instead of a Ruby formula.
+
+It never moves the manifest back. A dispatch can name any tag, and a release
+workflow run again on an old tag sends that tag here, so "the release that was
+announced last" is not "the newest release". A tag older than the manifest's
+version, or than any release its URLs name, is refused before anything is
+downloaded. Going back on purpose is a hand edit, which is the right cost for
+it.
 """
 
 from __future__ import annotations
@@ -112,10 +119,34 @@ def check_shape(manifest: dict, repo: str) -> None:
                 )
 
 
+def release(tag: str, where: str) -> tuple[int, int, int]:
+    """vX.Y.Z as three numbers, so that v0.2.10 comes after v0.2.9."""
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+    if not m:
+        raise Refused(f"{where} {tag}, which is not a release tag, so which is newer cannot be told")
+    return int(m[1]), int(m[2]), int(m[3])
+
+
 def plan(path: Path, tag: str, repo: str) -> tuple[str, list[tuple[str, str]]]:
     """Work out the new manifest text without writing it."""
     manifest = json.loads(path.read_text())
     check_shape(manifest, repo)
+
+    # Before anything is fetched: a downgrade is refused for what it is, not
+    # for whatever the old release happens to be missing. The version is what
+    # scoop update compares, and the URLs are what it fetches, so both count.
+    wanted = release(tag, "the tag to bump to is")
+    current = [("the manifest's version is", "v" + manifest["version"])] + [
+        (f"{key} url {i + 1} points at", URL.fullmatch(url)["tag"])
+        for key in FILES
+        for i, url in enumerate(manifest["architecture"][key]["url"])
+    ]
+    for where, have in current:
+        if release(have, where) > wanted:
+            raise Refused(
+                f"{path.name} points at {have}, which is newer than {tag}. "
+                "A bump never moves a manifest back; to go back on purpose, edit it by hand"
+            )
 
     base = f"https://github.com/{repo}/releases/download/{tag}"
     published = read_checksums(fetch(f"{base}/SHA256SUMS").decode())
