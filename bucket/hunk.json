@@ -1,5 +1,5 @@
 {
-    "version": "0.3.4",
+    "version": "0.3.5",
     "description": "Transactional multi-file text editor for coding agents",
     "homepage": "https://github.com/kmoneil/hunk",
     "license": "Apache-2.0",
@@ -9,22 +9,22 @@
     "architecture": {
         "64bit": {
             "url": [
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.4/hunk-windows-amd64.exe#/hunk.exe",
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.4/hunk-skill.tar.gz#/skill.download"
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.5/hunk-windows-amd64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.5/hunk-skill.tar.gz#/skill.download"
             ],
             "hash": [
-                "21d491e18a48e4aae44e75da00e30b19409701d709b621c849655a893e3eb1aa",
-                "8aefe3167846742cdef77415622d422ccbadc031e92ce27cc261deb3c14950dc"
+                "306830b1096c6d9b0748b2a837a482a70562aa8e3d70a5823c0e93355b12795e",
+                "f8b752735a05540a0387c8544cb22f59ce93d943ff90193a76abbc7151b7431c"
             ]
         },
         "arm64": {
             "url": [
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.4/hunk-windows-arm64.exe#/hunk.exe",
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.4/hunk-skill.tar.gz#/skill.download"
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.5/hunk-windows-arm64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.5/hunk-skill.tar.gz#/skill.download"
             ],
             "hash": [
-                "942065ecde90546f14a42046459297a0bd664a8521806ff1d70a31ee342312a3",
-                "8aefe3167846742cdef77415622d422ccbadc031e92ce27cc261deb3c14950dc"
+                "ba19732b17a0beb3cfe3fb0d5898a237f9f6fb4b78648dae10a73022843dbd55",
+                "f8b752735a05540a0387c8544cb22f59ce93d943ff90193a76abbc7151b7431c"
             ]
         }
     },
