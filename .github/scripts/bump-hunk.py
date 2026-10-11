@@ -56,15 +56,18 @@ class Refused(Exception):
     """A check failed. The manifest is not written."""
 
 
-def fetch(url: str) -> bytes:
-    """Read a URL. A release asset is public: no token."""
+def fetch(url: str, dest: Path | None = None) -> bytes:
+    """Read a URL, saving it when asked. A release asset is public: no token."""
     try:
         with urllib.request.urlopen(url) as response:  # noqa: S310 - https, fixed host
-            return response.read()
+            data = response.read()
     except urllib.error.HTTPError as err:
         raise Refused(f"{url} answered {err.code} {err.reason}") from err
     except urllib.error.URLError as err:
         raise Refused(f"{url} could not be reached: {err.reason}") from err
+    if dest is not None:
+        dest.write_bytes(data)
+    return data
 
 
 def read_checksums(text: str) -> dict[str, str]:
@@ -151,6 +154,11 @@ def plan(path: Path, tag: str, repo: str) -> tuple[str, list[tuple[str, str]]]:
     base = f"https://github.com/{repo}/releases/download/{tag}"
     published = read_checksums(fetch(f"{base}/SHA256SUMS").decode())
 
+    # Saved, not only hashed: verify-provenance.py asks gh about these copies,
+    # the same bytes the digests below were derived from.
+    downloads = Path(os.environ.get("HUNK_DOWNLOAD_DIR", "dist"))
+    downloads.mkdir(parents=True, exist_ok=True)
+
     # Each file once, though the skill is named by both architectures.
     digests: dict[str, str] = {}
     for files in FILES.values():
@@ -160,7 +168,7 @@ def plan(path: Path, tag: str, repo: str) -> tuple[str, list[tuple[str, str]]]:
             if asset not in published:
                 raise Refused(f"{tag} publishes no {asset}")
             want = published[asset]
-            got = hashlib.sha256(fetch(f"{base}/{asset}")).hexdigest()
+            got = hashlib.sha256(fetch(f"{base}/{asset}", downloads / asset)).hexdigest()
             if got != want:
                 # The manifest and the bytes behind the URL disagree. Whichever
                 # is wrong, the manifest must carry neither.

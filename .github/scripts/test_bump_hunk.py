@@ -87,12 +87,15 @@ class Stub:
         self.sums, self.bodies = sums, bodies or {}
         self.urls: list[str] = []
 
-    def __call__(self, url: str) -> bytes:
+    def __call__(self, url: str, dest: Path | None = None) -> bytes:
         self.urls.append(url)
         name = url.rsplit("/", 1)[1]
         if name == "SHA256SUMS":
             return "".join(f"{d}  {n}\n" for n, d in self.sums.items()).encode()
-        return self.bodies.get(name, body(name))
+        data = self.bodies.get(name, body(name))
+        if dest is not None:
+            dest.write_bytes(data)
+        return data
 
 
 class PlanTest(unittest.TestCase):
@@ -101,6 +104,13 @@ class PlanTest(unittest.TestCase):
         self.path = scratch / "hunk.json"
         self.path.write_text(TEXT)
         self.addCleanup(setattr, bump, "fetch", bump.fetch)
+        # The script saves what it downloads so the workflow can check its
+        # provenance. Under test that lands somewhere temporary: the default
+        # is ./dist, and a suite that writes into the repository it is testing
+        # gets those files committed by the next `git add -A`.
+        self.downloads = scratch / "downloads"
+        os.environ["HUNK_DOWNLOAD_DIR"] = str(self.downloads)
+        self.addCleanup(os.environ.pop, "HUNK_DOWNLOAD_DIR", None)
 
     def use(self, sums, bodies=None):
         bump.fetch = Stub(sums, bodies)
@@ -297,6 +307,23 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(stub.urls[0], f"{BASE}/SHA256SUMS", "the manifest was not read first")
         self.assertEqual(sorted(stub.urls[1:]), sorted(f"{BASE}/{a}" for a in ASSETS))
 
+    def test_it_saves_every_file_it_hashed_for_the_provenance_check(self):
+        """verify-provenance.py asks gh about the saved copies, not the URLs."""
+        self.use(honest())
+        bump.plan(self.path, "v2.0.0", "kmoneil/hunk")
+        for asset in ASSETS:
+            saved = self.downloads / asset
+            self.assertTrue(saved.is_file(), f"{asset} was not saved")
+            self.assertEqual(saved.read_bytes(), body(asset))
+
+    def test_without_the_variable_it_saves_into_dist_where_the_verify_step_looks(self):
+        """bump-hunk.yml runs verify-provenance.py with its default, dist."""
+        self.use(honest())
+        os.environ.pop("HUNK_DOWNLOAD_DIR", None)
+        with contextlib.chdir(self.path.parent):
+            bump.plan(self.path, "v2.0.0", "kmoneil/hunk")
+        self.assertTrue((self.path.parent / "dist" / "hunk-skill.tar.gz").is_file())
+
     def test_the_manifest_keeps_its_layout(self):
         """Four-space indent, keys in their order, and a final newline, as Scoop's own are."""
         self.use(honest())
@@ -316,7 +343,12 @@ class MainTest(unittest.TestCase):
         self.outputs = scratch / "outputs"
         self.addCleanup(setattr, bump, "fetch", bump.fetch)
         bump.fetch = Stub(honest())
-        self.enterContext(unittest.mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(self.outputs)}))
+        self.enterContext(
+            unittest.mock.patch.dict(
+                os.environ,
+                {"GITHUB_OUTPUT": str(self.outputs), "HUNK_DOWNLOAD_DIR": str(scratch / "downloads")},
+            )
+        )
 
     def run_main(self, *args):
         out, err = io.StringIO(), io.StringIO()

@@ -8,6 +8,9 @@ name: bump hunk
 #
 # - the rewrite is committed and pushed to a branch before anything verifies
 #   it, so what is verified is a commit rather than a working tree;
+# - every file it names must carry build provenance from hunk's release
+#   workflow, built from the tag, on a runner GitHub hosts, before anything
+#   is committed;
 # - it is verified by installing it with Scoop on Windows, and the installed
 #   binary must report the version that was asked for, not merely agree with
 #   the manifest;
@@ -65,6 +68,19 @@ jobs:
         id: bump
         run: python3 .github/scripts/bump-hunk.py --tag "$TAG"
 
+      # The rewrite proved the bytes behind each URL are the bytes SHA256SUMS
+      # names, and SHA256SUMS comes from the same workflow as the files. This
+      # proves which workflow that was, before the commit, so a file without
+      # provenance never reaches a branch, let alone main.
+      - name: verify build provenance
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/verify-provenance.py
+          --manifest bucket/hunk.json --repo kmoneil/hunk
+          --workflow kmoneil/hunk/.github/workflows/release.yml --tag "$TAG"
+
       # A re-run of a release dispatches again, and has nothing to do rather
       # than something to undo.
       - name: nothing to do
@@ -88,9 +104,12 @@ jobs:
             printf 'bump-hunk workflow.\n\n'
             printf 'Every digest was read from the release SHA256SUMS and\n'
             printf 're-derived from the file downloaded from the URL this\n'
-            printf 'manifest now carries. The manifest was installed with Scoop\n'
-            printf 'on a Windows runner from this commit, and the installed\n'
-            printf 'binary was asserted to report %s.\n\n' "$VERSION"
+            printf 'manifest now carries. Every one of those files carries\n'
+            printf 'build provenance from kmoneil/hunk/.github/workflows/release.yml,\n'
+            printf 'built from %s on a runner GitHub hosts, as checked by\n' "$TAG"
+            printf 'gh attestation verify. The manifest was installed with\n'
+            printf 'Scoop on a Windows runner from this commit, and the\n'
+            printf 'installed binary was asserted to report %s.\n\n' "$VERSION"
             printf 'Release notes:\n'
             printf 'https://github.com/kmoneil/hunk/releases/tag/%s\n' "$TAG"
           } > "$RUNNER_TEMP/commit-message.txt"
