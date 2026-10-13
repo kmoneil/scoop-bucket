@@ -1,18 +1,18 @@
 {
-    "version": "0.19.8",
+    "version": "0.20.0",
     "description": "Jira client whose output is a versioned contract, for scripts and agents",
     "homepage": "https://github.com/kmoneil/jr",
     "license": "Apache-2.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/kmoneil/jr/releases/download/v0.19.8/jr-full_0.19.8_windows_amd64.zip",
-            "hash": "519f17194c4676f9bbcd5fdf03e31511d53ed22e0e9f2e073c84230680fd6e4d",
-            "extract_dir": "jr-full_0.19.8_windows_amd64"
+            "url": "https://github.com/kmoneil/jr/releases/download/v0.20.0/jr-full_0.20.0_windows_amd64.zip",
+            "hash": "60012f5e21ef274b7dc213a8948c28079d909cfa2f436fb6cad1766dff7d02f3",
+            "extract_dir": "jr-full_0.20.0_windows_amd64"
         },
         "arm64": {
-            "url": "https://github.com/kmoneil/jr/releases/download/v0.19.8/jr-full_0.19.8_windows_arm64.zip",
-            "hash": "cba26a77df5be5f6cf0bb4874c808bc94a76b73dc951782d96e5426a8b2e126e",
-            "extract_dir": "jr-full_0.19.8_windows_arm64"
+            "url": "https://github.com/kmoneil/jr/releases/download/v0.20.0/jr-full_0.20.0_windows_arm64.zip",
+            "hash": "441766114f7d09900b4c602a1eeef340d308c8d232276edccdbd1ffca6a909d9",
+            "extract_dir": "jr-full_0.20.0_windows_arm64"
         }
     },
     "bin": "jr.exe",
