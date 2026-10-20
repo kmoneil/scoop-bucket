@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+"""Tests for bump-zigvet.py, and mostly for the refusals.
+
+The happy path is checked every release by the workflow that runs the script:
+Scoop installs the manifest it wrote, on Windows, and runs the binary. What that
+run cannot show is a refusal, because a healthy release does not produce one.
+These do.
+
+Every file is served different bytes, so every digest differs. That is what
+lets a test see a digest land beside the wrong URL: with one body for both, a
+rewrite that gave 64bit the arm64 digest would pass.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import copy
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import tempfile
+import unittest
+import unittest.mock
+import urllib.error
+from pathlib import Path
+
+HERE = Path(__file__).parent
+SPEC = importlib.util.spec_from_file_location("bump_zigvet", HERE / "bump-zigvet.py")
+bump = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(bump)
+
+OLD = "https://github.com/kmoneil/zigvet/releases/download/v1.0.0"
+BASE = "https://github.com/kmoneil/zigvet/releases/download/v2.0.0"
+ZERO = "0" * 64
+
+MANIFEST = {
+    "version": "1.0.0",
+    "description": "Things Zig compiles that are wrong",
+    "homepage": "https://github.com/kmoneil/zigvet",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": [f"{OLD}/zigvet-windows-amd64.exe#/zigvet.exe"],
+            "hash": [ZERO],
+        },
+        "arm64": {
+            "url": [f"{OLD}/zigvet-windows-arm64.exe#/zigvet.exe"],
+            "hash": [ZERO],
+        },
+    },
+    "bin": "zigvet.exe",
+}
+TEXT = json.dumps(MANIFEST, indent=4) + "\n"
+
+ASSETS = ["zigvet-windows-amd64.exe", "zigvet-windows-arm64.exe"]
+# What a release publishes, the files no manifest here names included.
+PUBLISHED = ASSETS + ["zigvet-darwin-arm64", "zigvet-darwin-amd64", "zigvet-linux-arm64", "zigvet-linux-amd64"]
+
+
+def body(name: str) -> bytes:
+    return f"the bytes of {name}".encode()
+
+
+def digest(name: str) -> str:
+    return hashlib.sha256(body(name)).hexdigest()
+
+
+def honest() -> dict[str, str]:
+    return {n: digest(n) for n in PUBLISHED}
+
+
+def edited(change) -> str:
+    """The manifest with one thing changed, as text."""
+    manifest = copy.deepcopy(MANIFEST)
+    change(manifest)
+    return json.dumps(manifest, indent=4) + "\n"
+
+
+class Stub:
+    """Stands in for the network: a manifest, and different bytes per file."""
+
+    def __init__(self, sums: dict[str, str], bodies: dict[str, bytes] | None = None):
+        self.sums, self.bodies = sums, bodies or {}
+        self.urls: list[str] = []
+
+    def __call__(self, url: str, dest: Path | None = None) -> bytes:
+        self.urls.append(url)
+        name = url.rsplit("/", 1)[1]
+        if name == "SHA256SUMS":
+            return "".join(f"{d}  {n}\n" for n, d in self.sums.items()).encode()
+        data = self.bodies.get(name, body(name))
+        if dest is not None:
+            dest.write_bytes(data)
+        return data
+
+
+class PlanTest(unittest.TestCase):
+    def setUp(self):
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.path = scratch / "zigvet.json"
+        self.path.write_text(TEXT)
+        self.addCleanup(setattr, bump, "fetch", bump.fetch)
+        # The script saves what it downloads so the workflow can check its
+        # provenance. Under test that lands somewhere temporary: the default
+        # is ./dist, and a suite that writes into the repository it is testing
+        # gets those files committed by the next `git add -A`.
+        self.downloads = scratch / "downloads"
+        os.environ["ZIGVET_DOWNLOAD_DIR"] = str(self.downloads)
+        self.addCleanup(os.environ.pop, "ZIGVET_DOWNLOAD_DIR", None)
+
+    def use(self, sums, bodies=None):
+        bump.fetch = Stub(sums, bodies)
+        return bump.fetch
+
+    def refusal(self, text=None):
+        if text is not None:
+            self.assertNotEqual(text, TEXT, "the test's own edit did not happen")
+            self.path.write_text(text)
+        with self.assertRaises(bump.Refused) as caught:
+            bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        return str(caught.exception)
+
+    def test_a_manifest_the_file_contradicts_is_refused(self):
+        """The one that matters: SHA256SUMS says one thing, the bytes another."""
+        self.use(honest(), {"zigvet-windows-arm64.exe": b"not what the manifest hashed"})
+        self.assertIn("zigvet-windows-arm64.exe hashes to", self.refusal())
+        self.assertEqual(self.path.read_text(), TEXT, "the manifest was written anyway")
+
+    def test_a_release_missing_a_binary_is_refused(self):
+        sums = honest()
+        del sums["zigvet-windows-arm64.exe"]
+        self.use(sums)
+        self.assertIn("v2.0.0 publishes no zigvet-windows-arm64.exe", self.refusal())
+
+
+    def test_an_empty_manifest_is_refused(self):
+        self.use({})
+        self.assertIn("SHA256SUMS held no digests", self.refusal())
+
+    def test_a_missing_architecture_is_refused(self):
+        self.use(honest())
+        text = edited(lambda m: m["architecture"].pop("arm64"))
+        self.assertIn("architectures are ['64bit'], and this script knows ['64bit', 'arm64']", self.refusal(text))
+
+    def test_an_architecture_this_script_does_not_know_is_refused(self):
+        self.use(honest())
+        text = edited(lambda m: m["architecture"].update({"32bit": copy.deepcopy(m["architecture"]["64bit"])}))
+        self.assertIn("architectures are ['32bit', '64bit', 'arm64']", self.refusal(text))
+
+    def test_a_list_of_the_wrong_length_is_refused(self):
+        self.use(honest())
+
+        def drop_the_binary(m):
+            m["architecture"]["64bit"]["url"].pop()
+            m["architecture"]["64bit"]["hash"].pop()
+
+        self.assertIn("64bit names 0 urls and 0 hashes", self.refusal(edited(drop_the_binary)))
+
+    def test_a_url_in_another_repository_is_refused(self):
+        self.use(honest())
+
+        def move(m):
+            m["architecture"]["arm64"]["url"][0] = m["architecture"]["arm64"]["url"][0].replace("kmoneil/zigvet", "someone/zigvet")
+
+        self.assertIn("arm64 url 1 points at someone/zigvet, not kmoneil/zigvet", self.refusal(edited(move)))
+
+    def test_a_binary_saved_under_another_name_is_refused(self):
+        """`bin` names zigvet.exe, so the binary has to be saved as that."""
+        self.use(honest())
+
+        def unrename(m):
+            m["architecture"]["64bit"]["url"][0] = f"{OLD}/zigvet-windows-amd64.exe#/zigvet-windows-amd64.exe"
+
+        self.assertIn(
+            "64bit url 1 fetches zigvet-windows-amd64.exe as zigvet-windows-amd64.exe, "
+            "and this script expects zigvet-windows-amd64.exe as zigvet.exe",
+            self.refusal(edited(unrename)),
+        )
+
+    def test_the_binaries_cannot_be_crossed(self):
+        self.use(honest())
+
+        def cross(m):
+            m["architecture"]["64bit"]["url"][0] = f"{OLD}/zigvet-windows-arm64.exe#/zigvet.exe"
+
+        self.assertIn(
+            "64bit url 1 fetches zigvet-windows-arm64.exe as zigvet.exe, "
+            "and this script expects zigvet-windows-amd64.exe as zigvet.exe",
+            self.refusal(edited(cross)),
+        )
+
+    def test_a_url_this_script_cannot_read_is_refused(self):
+        self.use(honest())
+
+        def unnamed(m):
+            m["architecture"]["64bit"]["url"][0] = f"{OLD}/zigvet-windows-amd64.exe"
+
+        self.assertIn("64bit url 1 is not a release download this script can read", self.refusal(edited(unnamed)))
+
+    def test_a_manifest_without_a_version_is_refused(self):
+        self.use(honest())
+        self.assertIn("the manifest has no version", self.refusal(edited(lambda m: m.pop("version"))))
+
+    def test_an_older_release_is_refused_before_anything_is_fetched(self):
+        """A release workflow run again on an old tag asks for exactly this."""
+        stub = self.use(honest())
+        with self.assertRaises(bump.Refused) as caught:
+            bump.plan(self.path, "v0.9.9", "kmoneil/zigvet")
+        self.assertIn("zigvet.json points at v1.0.0, which is newer than v0.9.9", str(caught.exception))
+        self.assertIn("A bump never moves a manifest back", str(caught.exception))
+        self.assertEqual(stub.urls, [], "a downgrade fetched before it was refused")
+        self.assertEqual(self.path.read_text(), TEXT)
+
+    def test_versions_compare_as_numbers_in_every_component(self):
+        """v0.2.10 after v0.2.9 is the row a string comparison gets backwards."""
+        rows = [
+            # (the manifest's release, the tag asked for, refused)
+            ("1.0.0", "v0.9.9", True),
+            ("1.2.0", "v1.1.9", True),
+            ("1.1.2", "v1.1.1", True),
+            ("0.2.10", "v0.2.9", True),
+            ("0.2.9", "v0.2.10", False),
+            ("0.10.0", "v0.9.0", True),
+            ("0.9.0", "v0.10.0", False),
+            ("9.0.0", "v10.0.0", False),
+            ("1.0.0", "v1.0.0", False),
+        ]
+        for have, want, refused in rows:
+            with self.subTest(have=have, want=want):
+                self.path.write_text(TEXT.replace("1.0.0", have))
+                self.use(honest())
+                if refused:
+                    with self.assertRaises(bump.Refused) as caught:
+                        bump.plan(self.path, want, "kmoneil/zigvet")
+                    self.assertIn(f"points at v{have}, which is newer than {want}", str(caught.exception))
+                else:
+                    text, _ = bump.plan(self.path, want, "kmoneil/zigvet")
+                    self.assertEqual(json.loads(text)["version"], want.removeprefix("v"))
+
+    def test_the_version_alone_is_enough_to_refuse(self):
+        """scoop update compares the version, so a newer one there counts though every URL is older."""
+        self.use(honest())
+        text = edited(lambda m: m.update({"version": "3.0.0"}))
+        self.assertIn("zigvet.json points at v3.0.0, which is newer than v2.0.0", self.refusal(text))
+
+    def test_one_url_already_newer_is_enough_to_refuse(self):
+        self.use(honest())
+
+        def ahead(m):
+            m["architecture"]["arm64"]["url"][0] = m["architecture"]["arm64"]["url"][0].replace("v1.0.0", "v3.0.0")
+
+        self.assertIn("zigvet.json points at v3.0.0, which is newer than v2.0.0", self.refusal(edited(ahead)))
+
+    def test_a_version_that_is_not_a_release_is_refused(self):
+        self.use(honest())
+        text = edited(lambda m: m.update({"version": "1.0.0-rc.1"}))
+        self.assertIn(
+            "the manifest's version is v1.0.0-rc.1, which is not a release tag, so which is newer cannot be told",
+            self.refusal(text),
+        )
+
+    def test_a_url_on_a_tag_that_is_not_a_release_is_refused(self):
+        self.use(honest())
+
+        def odd(m):
+            m["architecture"]["64bit"]["url"][0] = m["architecture"]["64bit"]["url"][0].replace("v1.0.0", "v1.0.0-rc.1")
+
+        self.assertIn("64bit url 1 points at v1.0.0-rc.1, which is not a release tag", self.refusal(edited(odd)))
+
+    def test_it_rewrites_the_version_urls_and_hashes_and_nothing_else(self):
+        self.use(honest())
+        text, _ = bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        after = json.loads(text)
+        self.assertEqual(after["version"], "2.0.0")
+        self.assertNotIn("v1.0.0", text)
+        self.assertNotIn(ZERO, text)
+        for key in ("64bit", "arm64"):
+            after["architecture"][key]["url"] = MANIFEST["architecture"][key]["url"]
+            after["architecture"][key]["hash"] = MANIFEST["architecture"][key]["hash"]
+        after["version"] = MANIFEST["version"]
+        self.assertEqual(after, MANIFEST, "something other than the version, urls and hashes changed")
+
+    def test_every_url_keeps_its_own_digest(self):
+        """A 64bit binary with the arm64 digest would fail every install."""
+        self.use(honest())
+        after = json.loads(bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")[0])
+        for key, files in bump.FILES.items():
+            urls, hashes = after["architecture"][key]["url"], after["architecture"][key]["hash"]
+            for url, hash_, (asset, name) in zip(urls, hashes, files):
+                self.assertEqual(url, f"{BASE}/{asset}#/{name}")
+                self.assertEqual(hash_, digest(asset))
+
+    def test_each_file_is_fetched_once(self):
+        """Each binary is downloaded one time, after the manifest."""
+        stub = self.use(honest())
+        bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        self.assertEqual(stub.urls[0], f"{BASE}/SHA256SUMS", "the manifest was not read first")
+        self.assertEqual(sorted(stub.urls[1:]), sorted(f"{BASE}/{a}" for a in ASSETS))
+
+    def test_it_saves_every_file_it_hashed_for_the_provenance_check(self):
+        """verify-provenance.py asks gh about the saved copies, not the URLs."""
+        self.use(honest())
+        bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        for asset in ASSETS:
+            saved = self.downloads / asset
+            self.assertTrue(saved.is_file(), f"{asset} was not saved")
+            self.assertEqual(saved.read_bytes(), body(asset))
+
+    def test_without_the_variable_it_saves_into_dist_where_the_verify_step_looks(self):
+        """bump-zigvet.yml runs verify-provenance.py with its default, dist."""
+        self.use(honest())
+        os.environ.pop("ZIGVET_DOWNLOAD_DIR", None)
+        with contextlib.chdir(self.path.parent):
+            bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        self.assertTrue((self.path.parent / "dist" / "zigvet-windows-amd64.exe").is_file())
+
+    def test_the_manifest_keeps_its_layout(self):
+        """Four-space indent, keys in their order, and a final newline, as Scoop's own are."""
+        self.use(honest())
+        text, _ = bump.plan(self.path, "v2.0.0", "kmoneil/zigvet")
+        self.assertTrue(text.endswith("}\n"))
+        self.assertTrue(text.startswith('{\n    "version": "2.0.0",\n    "description"'))
+        self.assertEqual(list(json.loads(text)), list(MANIFEST))
+
+
+class MainTest(unittest.TestCase):
+    """The command line: what it refuses, what it writes, and what a re-run does."""
+
+    def setUp(self):
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.path = scratch / "zigvet.json"
+        self.path.write_text(TEXT)
+        self.outputs = scratch / "outputs"
+        self.addCleanup(setattr, bump, "fetch", bump.fetch)
+        bump.fetch = Stub(honest())
+        self.enterContext(
+            unittest.mock.patch.dict(
+                os.environ,
+                {"GITHUB_OUTPUT": str(self.outputs), "ZIGVET_DOWNLOAD_DIR": str(scratch / "downloads")},
+            )
+        )
+
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = bump.main(["--manifest", str(self.path), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def emitted(self):
+        return dict(line.split("=", 1) for line in self.outputs.read_text().splitlines())
+
+    def test_a_prerelease_is_refused(self):
+        code, _, err = self.run_main("--tag", "v2.0.0-rc.1")
+        self.assertEqual(code, 2)
+        self.assertIn("v2.0.0-rc.1 is not a release tag", err)
+        self.assertEqual(self.path.read_text(), TEXT)
+
+    def test_a_refusal_exits_1_and_writes_nothing(self):
+        bump.fetch = Stub({})
+        code, _, err = self.run_main("--tag", "v2.0.0")
+        self.assertEqual(code, 1)
+        self.assertIn("refused: SHA256SUMS held no digests", err)
+        self.assertEqual(self.path.read_text(), TEXT)
+
+    def test_it_writes_the_manifest_and_says_so(self):
+        code, out, _ = self.run_main("--tag", "v2.0.0")
+        self.assertEqual(code, 0)
+        self.assertIn("zigvet.json now points at 2.0.0", out)
+        self.assertIn(f"{BASE}/zigvet-windows-amd64.exe#/zigvet.exe", self.path.read_text())
+        self.assertEqual(self.emitted(), {"version": "2.0.0", "changed": "true"})
+
+    def test_check_says_and_writes_nothing(self):
+        code, out, _ = self.run_main("--tag", "v2.0.0", "--check")
+        self.assertEqual(code, 0)
+        self.assertIn("--check: the manifest is unchanged on disk", out)
+        self.assertEqual(self.path.read_text(), TEXT)
+        self.assertEqual(self.emitted()["changed"], "true")
+
+    def test_a_second_run_has_nothing_to_do(self):
+        self.run_main("--tag", "v2.0.0")
+        written = self.path.read_text()
+        self.outputs.unlink()
+        code, out, _ = self.run_main("--tag", "v2.0.0")
+        self.assertEqual(code, 0)
+        self.assertIn("zigvet.json already points at 2.0.0; nothing to do", out)
+        self.assertEqual(self.path.read_text(), written)
+        self.assertEqual(self.emitted(), {"version": "2.0.0", "changed": "false"})
+
+    def test_an_older_tag_after_a_newer_one_exits_1_and_writes_nothing(self):
+        """v2.0.0 is out and the manifest has it; then v1.0.0 is announced again."""
+        self.run_main("--tag", "v2.0.0")
+        written = self.path.read_text()
+        self.outputs.unlink()
+        code, out, err = self.run_main("--tag", "v1.0.0")
+        self.assertEqual(code, 1)
+        self.assertIn("refused: zigvet.json points at v2.0.0, which is newer than v1.0.0", err)
+        self.assertEqual(out, "")
+        self.assertEqual(self.path.read_text(), written)
+        self.assertFalse(self.outputs.exists(), "a refused bump reported outputs to the workflow")
+
+
+class FetchTest(unittest.TestCase):
+    """A network failure is a refusal that names the URL, not a traceback."""
+
+    def refusal(self, error):
+        with unittest.mock.patch.object(bump.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(bump.Refused) as caught:
+                bump.fetch(f"{BASE}/SHA256SUMS")
+        return str(caught.exception)
+
+    def test_a_missing_file_is_refused(self):
+        error = urllib.error.HTTPError(f"{BASE}/SHA256SUMS", 404, "Not Found", None, None)
+        self.assertIn("SHA256SUMS answered 404 Not Found", self.refusal(error))
+
+    def test_an_unreachable_host_is_refused(self):
+        self.assertIn("could not be reached: no route", self.refusal(urllib.error.URLError("no route")))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -72,21 +72,38 @@ version. `scoop uninstall hunk` leaves the skill where it is.
 `--verify` and `--try` run their command with `sh`, which Windows does not
 have. `scoop install git` provides one.
 
+## `zigvet`
+
+Things Zig compiles that are wrong: code the Zig compiler accepts in every
+build mode that is almost certainly a bug, such as a pointer into stack memory
+that outlives the function that made it.
+[kmoneil/zigvet](https://github.com/kmoneil/zigvet).
+
+```powershell
+scoop install kmoneil/zigvet
+zigvet --version
+```
+
+On amd64 and arm64. It installs one thing, `zigvet.exe`, on your `PATH`
+through Scoop's shims. To run zigvet as a `zig build lint` step instead, a
+project fetches it as a Zig package; its README has
+[the step](https://github.com/kmoneil/zigvet#use-it-in-a-build).
+
 ## How it stays current
 
-Each hunk and jr release tells this repository that it exists, and
-`bump-hunk.yml` or `bump-jr.yml` does the rest: it rewrites the manifest's
-version, URLs and digests, reading each digest from the release's own manifest
-(`SHA256SUMS` for hunk, `checksums.txt` for jr) and re-deriving it from the
-download; for jr, verifies that every zip carries build provenance from jr's
-release workflow, built from the tag; installs the result with Scoop on a
+Each hunk, jr and zigvet release tells this repository that it exists, and
+its `bump-*.yml` does the rest: it rewrites the manifest's version, URLs and
+digests, reading each digest from the release's own manifest (`SHA256SUMS`
+for hunk and zigvet, `checksums.txt` for jr) and re-deriving it from the
+download; verifies that every file carries build provenance from the
+release's workflow, built from the tag; installs the result with Scoop on a
 Windows runner; and only then moves `main`. `scoop.yml` installs each manifest
 the same way on every change.
 
-hunk's bump never moves the manifest back: a tag older than the version it
-already carries is refused before anything is downloaded, so a release run
-again on an old tag cannot undo a newer one. Going back on purpose is a hand
-edit.
+hunk's and zigvet's bumps never move the manifest back: a tag older than the
+version it already carries is refused before anything is downloaded, so a
+release run again on an old tag cannot undo a newer one. Going back on
+purpose is a hand edit.
 
 The skill is downloaded as `skill.download` rather than under its own name, on
 purpose: Scoop extracts a `.tar.gz` only after installing 7-Zip, and the
