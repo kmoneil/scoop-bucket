@@ -1,0 +1,72 @@
+name: install zigvet with Scoop
+description: >
+  On a Windows runner: install Scoop, install zigvet from this checkout's
+  bucket/zigvet.json, check that what it installed is the version asked for
+  and does what zigvet is for, and check that uninstalling removes it.
+
+# One definition of "the manifest works", for the two callers that ask it:
+# scoop.yml, of a change somebody pushed, and bump-zigvet.yml, of a manifest a
+# script has just rewritten. It is install-hunk without the skill.
+
+inputs:
+  expect-version:
+    description: >
+      The version zigvet must report. Empty means whatever the manifest says,
+      which is all scoop.yml can ask. A bump knows the answer before it starts,
+      which is how it catches a manifest that is not the one it meant to
+      verify.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: install Scoop
+      shell: pwsh
+      run: |
+        # The runners are administrators, and Scoop's installer refuses one
+        # unless told it may.
+        Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+        Join-Path $env:USERPROFILE 'scoop\shims' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+    - name: install zigvet from this checkout
+      shell: pwsh
+      run: scoop install (Resolve-Path bucket\zigvet.json).Path
+
+    - name: what it installed
+      shell: pwsh
+      env:
+        WANT: ${{ inputs.expect-version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $manifest = Get-Content bucket\zigvet.json -Raw | ConvertFrom-Json
+        $want = if ($env:WANT) { $env:WANT } else { $manifest.version }
+        if ($manifest.version -ne $want) {
+          throw "bucket/zigvet.json says $($manifest.version), and $want was asked for"
+        }
+        $got = zigvet --version
+        if ($got -ne "zigvet $want") { throw "zigvet --version said '$got', not 'zigvet $want'" }
+
+        # What the tool is for, and it needs no network: the address of an
+        # array built at run time, returned, is reported with exit 1, and the
+        # same array of comptime-known bytes is not.
+        Push-Location $env:RUNNER_TEMP
+        Set-Content -Path escape.zig -NoNewline -Value "fn f(n: u8) []const u8 {`n    return &.{n};`n}`n"
+        Set-Content -Path static.zig -NoNewline -Value "fn f() []const u8 {`n    return &.{ 1, 2 };`n}`n"
+        $reported = zigvet escape.zig
+        if ($LASTEXITCODE -ne 1) { throw "zigvet exited $LASTEXITCODE on a returned stack address, not 1" }
+        if (-not ($reported -match '^escape\.zig:2:12: escape: anonymous array made here leaves f through return$')) {
+          throw "zigvet reported '$reported'"
+        }
+        $quiet = zigvet static.zig
+        if ($LASTEXITCODE -ne 0) { throw "zigvet exited $LASTEXITCODE on comptime-known bytes: '$quiet'" }
+        Pop-Location
+        "zigvet $want from $((Get-Command zigvet).Source), and it reports a returned stack address"
+
+    - name: uninstalling removes it
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        scoop uninstall zigvet
+        if (Get-Command zigvet -ErrorAction SilentlyContinue) { throw 'zigvet is still on the PATH' }
+        'uninstalled'

@@ -1,0 +1,172 @@
+name: bump zigvet
+
+# Point bucket/zigvet.json at a zigvet release without anybody editing its lines by
+# hand. The release workflow in kmoneil/zigvet sends `zigvet-released` here once the
+# binaries and SHA256SUMS are published.
+#
+# The shape is the one kmoneil/homebrew-tap's bump arrived at, the hard way:
+#
+# - the rewrite is committed and pushed to a branch before anything verifies
+#   it, so what is verified is a commit rather than a working tree;
+# - every file it names must carry build provenance from zigvet's release
+#   workflow, built from the tag, on a runner GitHub hosts, before anything
+#   is committed;
+# - it is verified by installing it with Scoop on Windows, and the installed
+#   binary must report the version that was asked for, not merely agree with
+#   the manifest;
+# - only then does main move: by a fast-forward, for a run started on main, and
+#   for the one commit on top of main as it stands.
+#
+# There is no pull request. One opened with this workflow's own token would run
+# no checks, and would look gated while being less gated than this.
+
+on:
+  repository_dispatch:
+    types: [zigvet-released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the zigvet release to point at, such as v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+# Two releases in quick succession queue rather than race. Cancelling would
+# leave a branch pushed and never landed.
+concurrency:
+  group: bump-zigvet
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: rewrite and push a branch
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+      version: ${{ steps.bump.outputs.version }}
+      branch: ${{ steps.push.outputs.branch }}
+      sha: ${{ steps.push.outputs.sha }}
+    # Through the environment rather than spliced into a script: a tag is
+    # whatever the dispatch said it was.
+    env:
+      TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: which release
+        run: |
+          [ -n "$TAG" ] || { echo "no tag was given"; exit 1; }
+          echo "asked to bump zigvet to $TAG"
+
+      # The refusals are what a healthy release never produces and the whole
+      # reason the rewrite is a script, so the script's tests run first.
+      - name: the script's own tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: rewrite the manifest
+        id: bump
+        run: python3 .github/scripts/bump-zigvet.py --tag "$TAG"
+
+      # The rewrite proved the bytes behind each URL are the bytes SHA256SUMS
+      # names, and SHA256SUMS comes from the same workflow as the files. This
+      # proves which workflow that was, before the commit, so a file without
+      # provenance never reaches a branch, let alone main.
+      - name: verify build provenance
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/verify-provenance.py
+          --manifest bucket/zigvet.json --repo kmoneil/zigvet
+          --workflow kmoneil/zigvet/.github/workflows/release.yml --tag "$TAG"
+
+      # A re-run of a release dispatches again, and has nothing to do rather
+      # than something to undo.
+      - name: nothing to do
+        if: steps.bump.outputs.changed != 'true'
+        run: echo "bucket/zigvet.json already points at ${{ steps.bump.outputs.version }}"
+
+      - name: commit it to a branch
+        id: push
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          branch="bump/zigvet-${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Written to a file rather than a heredoc: a heredoc inside an
+          # indented block scalar carries its indentation into the message.
+          {
+            printf 'zigvet: bump to %s\n\n' "$VERSION"
+            printf 'Written by .github/scripts/bump-zigvet.py and landed by the\n'
+            printf 'bump-zigvet workflow.\n\n'
+            printf 'Every digest was read from the release SHA256SUMS and\n'
+            printf 're-derived from the file downloaded from the URL this\n'
+            printf 'manifest now carries. Every one of those files carries\n'
+            printf 'build provenance from kmoneil/zigvet/.github/workflows/release.yml,\n'
+            printf 'built from %s on a runner GitHub hosts, as checked by\n' "$TAG"
+            printf 'gh attestation verify. The manifest was installed with\n'
+            printf 'Scoop on a Windows runner from this commit, and the\n'
+            printf 'installed binary was asserted to report %s.\n\n' "$VERSION"
+            printf 'Release notes:\n'
+            printf 'https://github.com/kmoneil/zigvet/releases/tag/%s\n' "$TAG"
+          } > "$RUNNER_TEMP/commit-message.txt"
+          git checkout -b "$branch"
+          git add bucket/zigvet.json
+          git commit -F "$RUNNER_TEMP/commit-message.txt"
+          # A failed attempt leaves its branch as evidence; fetch it so the
+          # lease has something to be about and a retry can start.
+          git fetch origin "+refs/heads/${branch}:refs/remotes/origin/${branch}" || true
+          git push --force-with-lease origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: install the rewrite with Scoop
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: windows-latest
+    steps:
+      # The commit, by its sha: what is installed has to be the rewrite itself.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: ./.github/actions/install-zigvet
+        with:
+          expect-version: ${{ needs.prepare.outputs.version }}
+
+  land:
+    name: fast-forward main
+    needs: [prepare, verify]
+    # Only a run on main lands. prepare commits on top of whatever ref the run
+    # started on, so a manual run from a branch would otherwise fast-forward
+    # main over that branch's unreviewed commits along with the bump.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: land the verified commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          # And only as the one commit on top of main as it stands. force is
+          # false as well, so GitHub refuses anything but a fast-forward.
+          main=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)
+          parent=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${SHA}" --jq '.parents[0].sha')
+          if [ "$parent" != "$main" ]; then
+            echo "${SHA} sits on ${parent}, and main is at ${main}." >&2
+            echo "Main moved, or this run did not start from it. Run it again from main." >&2
+            exit 1
+          fi
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
+            -f sha="${SHA}" -F force=false > /dev/null
+          echo "main is at ${SHA}"
+
+      # Only on success: a failed run keeps its branch, as the evidence.
+      - name: drop the bump branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+        run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}"
