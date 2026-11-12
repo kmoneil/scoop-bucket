@@ -1,5 +1,5 @@
 {
-    "version": "0.3.47",
+    "version": "0.3.48",
     "description": "Transactional multi-file text editor for coding agents",
     "homepage": "https://github.com/kmoneil/hunk",
     "license": "Apache-2.0",
@@ -9,22 +9,22 @@
     "architecture": {
         "64bit": {
             "url": [
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.47/hunk-windows-amd64.exe#/hunk.exe",
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.47/hunk-skill.tar.gz#/skill.download"
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.48/hunk-windows-amd64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.48/hunk-skill.tar.gz#/skill.download"
             ],
             "hash": [
-                "19587fe1f52c3096c1c05e3d85a65738482bb3cad051a3823cf890a662326dcc",
-                "2eedb75173a71cf823b8794fabffd8b377c9fcb7ef62bd9526b8edf21fe7f0fd"
+                "aa3f64d4187dc73fe52390c234d98df725331f441d3dbf478be6925c94fc9e0b",
+                "a3cd3aed90ec036ff7d39e736c01efce06596bf190dedfdb6925dedc5c1a52fb"
             ]
         },
         "arm64": {
             "url": [
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.47/hunk-windows-arm64.exe#/hunk.exe",
-                "https://github.com/kmoneil/hunk/releases/download/v0.3.47/hunk-skill.tar.gz#/skill.download"
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.48/hunk-windows-arm64.exe#/hunk.exe",
+                "https://github.com/kmoneil/hunk/releases/download/v0.3.48/hunk-skill.tar.gz#/skill.download"
             ],
             "hash": [
-                "b8779f68480c54c7f79d35538ed5214d162a086b6b6bd3a400982c1518e91bd3",
-                "2eedb75173a71cf823b8794fabffd8b377c9fcb7ef62bd9526b8edf21fe7f0fd"
+                "c4e237deadc04cc065cc74a3eb96bec5ea68baba3007d459e1ddc0ac112ffc1d",
+                "a3cd3aed90ec036ff7d39e736c01efce06596bf190dedfdb6925dedc5c1a52fb"
             ]
         }
     },
