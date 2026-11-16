@@ -1,23 +1,23 @@
 {
-    "version": "0.27.0",
+    "version": "0.28.0",
     "description": "Things Zig compiles that are wrong",
     "homepage": "https://github.com/kmoneil/zigvet",
     "license": "Apache-2.0",
     "architecture": {
         "64bit": {
             "url": [
-                "https://github.com/kmoneil/zigvet/releases/download/v0.27.0/zigvet-windows-amd64.exe#/zigvet.exe"
+                "https://github.com/kmoneil/zigvet/releases/download/v0.28.0/zigvet-windows-amd64.exe#/zigvet.exe"
             ],
             "hash": [
-                "4cb9e4868ad689de442eb0025e66ba239e31c5952e534c7e5e0e45a8ad168fdf"
+                "2ee1e3d4835bcb5fa9015588e4d2e9fbccce9ec09090e87249f85e3b8eb8a23b"
             ]
         },
         "arm64": {
             "url": [
-                "https://github.com/kmoneil/zigvet/releases/download/v0.27.0/zigvet-windows-arm64.exe#/zigvet.exe"
+                "https://github.com/kmoneil/zigvet/releases/download/v0.28.0/zigvet-windows-arm64.exe#/zigvet.exe"
             ],
             "hash": [
-                "046f5715a4615522192a33d32e6da2b9f8fab3cfcc0059f2c06e17792a507c91"
+                "7e5c87bfaeaa627f95a18140d410c46f6690a8ddde0ee2ca92660c0d9c924e7f"
             ]
         }
     },
